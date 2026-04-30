@@ -1,0 +1,300 @@
+You are helping me build a production-minded local-first Python automation project. I am not an experienced software engineer, so I need you to act like a senior technical architect and implementation guide.
+
+I want you to design and help implement a modular system that does the following workflow:
+
+PROJECT GOAL
+Build a Telegram-to-X news publishing pipeline.
+
+HIGH-LEVEL FLOW
+1. The system monitors a predefined set of Telegram channels/groups.
+2. Every hour, it fetches recent posts from those sources.
+3. It creates a temporary pool of candidate posts.
+4. It filters posts based on age, engagement, duplication, and relevance.
+5. The filtered posts are sent to me through a Telegram bot for manual approval.
+6. When I approve a post, the content is sent to OpenAI API.
+7. OpenAI rewrites/translates the content into English, cleans it up, and makes it suitable for X posting style.
+8. If media/video exists, it should be preserved and prepared for publishing.
+9. Approved and rewritten content enters a publishing queue.
+10. The system publishes one queued post to X roughly every 30 minutes.
+11. Later, this project may be moved from local machines to a server/VPS, so the architecture must be migration-friendly from the beginning.
+
+IMPORTANT OPERATIONAL NOTES
+- At the beginning, the project will run on local machines, not a server.
+- It may rotate between different local machines over time.
+- Because of that, the architecture must avoid being tightly coupled to one machine.
+- However, this is still phase 1, so keep things simple and practical.
+- The database is NOT intended to become a large permanent archive.
+- The data is temporary and operational only.
+- The system should mostly keep only recent posts and the short-term publish queue.
+- Most records can be auto-deleted after they become stale.
+
+DATA RETENTION / FILTER LOGIC
+I want the system to behave like a temporary buffer, not a long-term data warehouse.
+
+Use logic similar to this:
+- Fetch posts from Telegram every hour.
+- If a post is more than 2 hours old AND has fewer than 100 reactions/emotes, discard it immediately.
+- Only keep recent and potentially useful items.
+- The system should only keep approximately up to 1 day of queue/state/history.
+- Old raw posts, expired candidates, old queue entries, and stale data should be cleaned automatically by scheduled cleanup jobs.
+
+SOFTWARE DESIGN REQUIREMENTS
+I do NOT want a messy prototype or a single-file script.
+I want a modular Python backend project that is local-first but designed so it can later be moved to a server with minimal pain.
+
+Use this mindset:
+- local-first
+- modular
+- simple but structured
+- migration-friendly
+- easy to debug
+- stateful enough to avoid duplicate processing/publishing
+- minimal storage footprint
+
+TECH STACK PREFERENCE
+Use Python.
+
+Suggested architecture:
+- Telegram collector module
+- filtering/scoring module
+- Telegram approval bot module
+- OpenAI rewrite module
+- X publishing module
+- scheduler/jobs module
+- database/state module
+- shared config/logging utilities
+
+DATABASE REQUIREMENTS
+Use SQLite for phase 1.
+But structure the code so that moving to PostgreSQL later would be relatively easy.
+
+Important:
+- The DB is for workflow state, not for analytics or long-term archival.
+- Keep it small and temporary.
+- Add cleanup logic.
+- Avoid overengineering.
+
+The DB should mainly help track:
+- whether a Telegram post has already been seen
+- whether it was filtered out
+- whether it was sent for approval
+- whether it was approved/rejected
+- whether it entered the publish queue
+- whether it was already published
+- basic system locks/state if needed
+
+Do NOT design a giant enterprise schema.
+Keep it lean.
+
+POSSIBLE MINIMAL TABLE CONCEPT
+You may simplify further, but keep the spirit:
+1. posts
+   - id
+   - source_name or source_id
+   - telegram_chat_id
+   - telegram_message_id
+   - original_text
+   - media_path
+   - created_at
+   - fetched_at
+   - reaction_count
+   - fingerprint_hash
+   - status (raw, dropped, candidate, approved, rejected, queued, published, failed)
+2. publish_queue
+   - id
+   - post_id
+   - scheduled_at
+   - priority
+   - status
+3. system_state or locks
+   - key
+   - value
+   - updated_at
+
+Again: keep it minimal.
+
+MEDIA REQUIREMENTS
+Telegram posts may include video or other media.
+The system must support handling media for later X publishing.
+
+Requirements:
+- Save media in a structured local storage folder.
+- Keep paths in DB.
+- Avoid duplicated downloads if possible.
+- Make the storage abstraction simple enough so that later it could be replaced by remote/object storage.
+
+APPROVAL FLOW REQUIREMENTS
+I want a Telegram bot to send me candidate posts for approval.
+
+Approval actions should be simple, ideally via inline buttons such as:
+- Approve
+- Reject
+- Hold
+
+When I approve:
+- move post to approved state
+- send content to OpenAI rewrite step
+- store the rewritten output
+- place it into publish queue
+
+OPENAI REQUIREMENTS
+Use OpenAI API to:
+- translate content to English if needed
+- clean up the text
+- make it suitable for X style
+- keep it concise, readable, and news-like
+- avoid spammy repetitive phrasing
+- preserve the core meaning
+- produce output ready for publishing
+
+The rewrite prompt should be configurable and easy to edit.
+
+X PUBLISHING REQUIREMENTS
+The system should publish approved posts to X, including media if present.
+Design it so that:
+- media upload is handled correctly
+- post publishing is tracked
+- errors are retried carefully
+- duplicate publishing is prevented
+
+SCHEDULING REQUIREMENTS
+Use a scheduler-based architecture.
+
+Initial desired jobs:
+- hourly Telegram fetch job
+- candidate processing/filtering job
+- approval dispatch job
+- publish job every ~30 minutes
+- cleanup job for stale data
+- retry job for failed transient tasks if needed
+
+Keep the scheduler simple.
+Do not overengineer distributed systems yet.
+
+DUPLICATE / NOVELTY REQUIREMENTS
+Even if content is about the same region or the same public figure, the system should avoid obvious duplication.
+I do NOT need perfect AI deduplication at first.
+Start with pragmatic rules:
+- exact duplicate detection
+- near-duplicate text similarity
+- optionally fingerprint/title similarity
+- drop low-value repetition
+
+The system should allow similar-topic posts if they contain meaningful new information.
+
+CONFIGURATION REQUIREMENTS
+All secrets and environment-specific config must be outside the codebase, ideally in .env.
+
+Examples:
+- Telegram API credentials
+- Telegram bot token
+- OpenAI API key
+- X API credentials
+- list of monitored Telegram sources
+- filtering thresholds
+- publish interval
+- cleanup retention hours
+
+PROJECT STRUCTURE REQUIREMENTS
+Create a clean folder structure like a real project, not a throwaway script.
+
+Something in this spirit is preferred:
+
+project/
+  app/
+    collectors/
+    filters/
+    bots/
+    ai/
+    publishers/
+    scheduler/
+    db/
+    core/
+  storage/
+    media/
+  tests/
+  .env
+  requirements.txt
+  main.py
+
+You may improve this structure, but keep it modular and readable.
+
+ENGINEERING STYLE REQUIREMENTS
+I want you to:
+- think like a senior engineer
+- keep the implementation practical
+- avoid unnecessary complexity
+- avoid premature microservices
+- avoid giant abstractions
+- explain tradeoffs clearly
+- propose the simplest architecture that still supports later server migration
+
+SERVER MIGRATION REQUIREMENTS
+This project will start on local machines, but later it may move to a VPS/server.
+
+So from day one, avoid choices that make migration painful.
+
+That means:
+- do not hardcode machine-specific paths everywhere
+- do not rely on in-memory-only state
+- keep storage and DB access reasonably abstracted
+- keep scheduling logic portable
+- keep configuration externalized
+
+I do NOT need full server deployment now, but I do want the codebase to be migration-friendly.
+
+WHAT I WANT FROM YOU
+I want you to help in this order:
+
+STEP 1
+Propose the architecture clearly:
+- modules
+- responsibilities
+- data flow
+- minimal DB design
+- scheduler/job flow
+- media flow
+- approval flow
+- migration considerations
+
+STEP 2
+Propose the project folder structure.
+
+STEP 3
+Generate an implementation roadmap in phases:
+- phase 1 foundation
+- phase 2 Telegram ingestion
+- phase 3 approval bot
+- phase 4 OpenAI rewrite
+- phase 5 X publishing
+- phase 6 scheduler and cleanup
+- phase 7 migration readiness improvements
+
+STEP 4
+Then start implementing file by file in a clean order.
+When generating code:
+- produce complete files
+- mention where each file should go
+- keep code readable
+- add comments
+- include logging
+- include basic error handling
+- avoid hidden magic
+
+IMPORTANT DEVELOPMENT INSTRUCTION
+Do NOT dump the entire codebase at once.
+Work incrementally and carefully.
+Before writing code, first give me:
+1. architecture overview
+2. project tree
+3. DB schema proposal
+4. phased implementation plan
+
+Then wait for my confirmation to generate the first files.
+
+Also, whenever you make a design choice, explain briefly why it is good for:
+- local-first use
+- temporary short-lived data
+- later server migration
+
+Keep the solution lean, practical, and suitable for a non-expert project owner.
