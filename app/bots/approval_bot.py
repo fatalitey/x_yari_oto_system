@@ -140,6 +140,8 @@ def main() -> None:
     app.run_polling(
         allowed_updates=Update.ALL_TYPES,
         timeout=60,
+        # approval bot ana thread dışında çalıştırılabildiği için signal handler kapat.
+        stop_signals=None,
     )
 
 
