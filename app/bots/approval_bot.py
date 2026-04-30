@@ -13,6 +13,8 @@ import logging
 import re
 
 from telegram import Update
+from telegram.error import NetworkError, TimedOut
+from telegram.request import HTTPXRequest
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, Defaults
 
 from app.bots import approval_service
@@ -22,6 +24,26 @@ from app.db.session import SessionLocal
 logger = logging.getLogger(__name__)
 
 _ACTION_RE = re.compile(r"^([ar]):(\d+)$")
+
+
+async def _reply_with_retry(message, text: str, *, parse_mode: str = "HTML", retries: int = 2) -> None:
+    for attempt in range(retries + 1):
+        try:
+            await message.reply_text(text[:4096], parse_mode=parse_mode)
+            return
+        except (TimedOut, NetworkError) as e:
+            if attempt >= retries:
+                logger.warning("Mesaj gönderimi başarısız (retry tükendi): %s", e)
+                return
+            await asyncio.sleep(1.5 * (attempt + 1))
+
+
+async def _on_bot_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    err = context.error
+    if isinstance(err, (TimedOut, NetworkError)):
+        logger.warning("Telegram ağ timeout hatası (işlem sürdürülecek): %s", err)
+        return
+    logger.exception("Onay botu handler hatası", exc_info=err)
 
 
 def _actor_name(update: Update) -> str:
@@ -86,13 +108,13 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     else:
         await q.edit_message_reply_markup(reply_markup=None)
     if q.message:
-        await q.message.reply_text(msg)
+        await _reply_with_retry(q.message, msg, parse_mode="HTML")
         if action == "a" and preview:
             preview_text = (
                 "<b>GPT Önizleme (X için)</b>\n"
                 f"<pre>{preview[:3900]}</pre>"
             )
-            await q.message.reply_text(preview_text)
+            await _reply_with_retry(q.message, preview_text, parse_mode="HTML")
 
 
 async def cmd_sira(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -111,7 +133,7 @@ async def cmd_sira(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             return "Kullanım: /sira  veya  /sira 6 cikar"
 
     msg = await asyncio.to_thread(work)
-    await update.message.reply_text(msg[:4096], parse_mode="HTML")
+    await _reply_with_retry(update.message, msg, parse_mode="HTML")
 
 
 def build_application() -> Application:
@@ -121,11 +143,20 @@ def build_application() -> Application:
     app = (
         Application.builder()
         .token(settings.telegram_bot_token)
+        .request(
+            HTTPXRequest(
+                connect_timeout=20.0,
+                read_timeout=40.0,
+                write_timeout=40.0,
+                pool_timeout=20.0,
+            )
+        )
         .defaults(Defaults(parse_mode="HTML"))
         .build()
     )
     app.add_handler(CallbackQueryHandler(on_callback, pattern=r"^[ar]:\d+$"))
     app.add_handler(CommandHandler("sira", cmd_sira))
+    app.add_error_handler(_on_bot_error)
     return app
 
 
